@@ -26,6 +26,8 @@ use App\Http\Controllers\TripTicketFuelRecordController;
 use App\Http\Controllers\TripTicketMaintenanceController;
 use App\Http\Controllers\PrsPurposeDictionaryController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\TripTicketSignatorySettingController;
+use App\Http\Controllers\OfficeFuelAllocationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -177,6 +179,26 @@ Route::middleware(['auth', 'verified', 'role:S,A,E'])->group(function () {
     Route::get('/TripTicketMaintenance', [TripTicketMaintenanceController::class, 'index'])->name('TripTicketMaintenance.index');
     Route::post('/TripTicketMaintenance/list', [TripTicketMaintenanceController::class, 'list'])->name('TripTicketMaintenance.list');
     Route::resource('/TripTicketMaintenance', TripTicketMaintenanceController::class)->except(['create', 'edit', 'index']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Super-Admin-Only Configuration Modules
+|--------------------------------------------------------------------------
+| These two are visible/reachable only to accLevel 'S' — everything else in
+| the app uses role:S,A,E. Keep that in mind if either of these controllers
+| is ever reused elsewhere with looser access.
+*/
+Route::middleware(['auth', 'verified', 'role:S'])->group(function () {
+    // Trip Ticket print signatories (Municipal Administrator / Mayor names)
+    Route::get('/TripTicketSignatory', [TripTicketSignatorySettingController::class, 'index'])->name('TripTicketSignatory.index');
+    Route::get('/TripTicketSignatory/current', [TripTicketSignatorySettingController::class, 'show'])->name('TripTicketSignatory.show');
+    Route::put('/TripTicketSignatory', [TripTicketSignatorySettingController::class, 'update'])->name('TripTicketSignatory.update');
+
+    // Office Fuel Allocation (liters allocated per office)
+    Route::get('/FuelAllocation', [OfficeFuelAllocationController::class, 'index'])->name('FuelAllocation.index');
+    Route::post('/FuelAllocation/list', [OfficeFuelAllocationController::class, 'list'])->name('FuelAllocation.list');
+    Route::resource('/FuelAllocation', OfficeFuelAllocationController::class)->except(['create', 'edit', 'index']);
 });
 
 /*
