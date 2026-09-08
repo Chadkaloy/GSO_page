@@ -14,7 +14,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem } from '@/types'; // 👈 Reverted back to just NavItem
 import { Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, Folder, LayoutGrid, ListCheck, LocateOffIcon, Award, BookMarked, Archive, IdCard, ReceiptText, Armchair, Building2, Ticket} from 'lucide-vue-next';
+import { BookOpen, Folder, LayoutGrid, ListCheck, LocateOffIcon, Award, BookMarked, Archive, IdCard, ReceiptText, Armchair, Building2, Ticket, Signature, Fuel} from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 import { computed } from 'vue';
 
@@ -150,6 +150,18 @@ const mainNavItems: NavItem[] = [
         href: '/TripTicketMaintenance',
         icon: Ticket ,
         roles: ['super_admin','inventory_user']
+    },
+    {
+        title: 'Trip Ticket Signatories',
+        href: '/TripTicketSignatory',
+        icon: Signature,
+        roles: ['super_admin']
+    },
+    {
+        title: 'Office Fuel Allocation',
+        href: '/FuelAllocation',
+        icon: Fuel,
+        roles: ['super_admin']
     }
 
 ];
@@ -166,9 +178,29 @@ const userRole = computed(() => {
     return props.auth?.user?.role || null;
 });
 
+// accLevel (S/A/E) comes from emp_accounts_record via the shared `permissions`
+// prop — this is the actual Super Admin / Admin / Staff hierarchy the backend
+// enforces (role:S middleware, Gates). It is NOT the same as users.role above,
+// which only reflects the login account type and can differ from accLevel.
+const accLevel = computed(() => {
+    const props = page.props as unknown as { permissions?: { accLevel?: string | null } };
+    return props.permissions?.accLevel ?? null;
+});
+
+// Hrefs that should only ever show for accLevel 'S' (Super Admin), regardless
+// of users.role. Kept as a small explicit list rather than a new NavItem
+// field so this doesn't require touching the shared NavItem type.
+const superAdminOnlyHrefs = ['/TripTicketSignatory', '/FuelAllocation'];
+
 // Filter navigation items based on the user's role
 const filteredNavItems = computed(() => {
-    return mainNavItems.filter((item) => {  
+    return mainNavItems.filter((item) => {
+        const href = typeof item.href === 'string' ? item.href : '';
+
+        if (superAdminOnlyHrefs.includes(href)) {
+            return accLevel.value === 'S';
+        }
+
         // If no roles are defined, show the item to everyone
         if (!item.roles) return true;
         // Check if the user's role is allowed

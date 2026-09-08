@@ -58,22 +58,25 @@ const permissions = computed(() => usePage().props.permissions as {
     print: boolean;
 });
 
-// --- Office options, fetched once from the existing /Office/lookup endpoint
-// used elsewhere in the app. The exact shape of each item isn't confirmed
-// here, so we defensively try a few common key names rather than assuming
-// one — a missing label just shows as blank/"Office #id" instead of
-// throwing and breaking the page. ---
+// --- Office options, fetched once from the existing /Office/list endpoint
+// (the same one powering the Office Dictionary table itself — /Office/lookup
+// doesn't actually exist in this app, unlike some other modules). Requesting
+// a large per_page pulls the full list in one call instead of a 10-row page.
+// The exact field names on each office row aren't confirmed here, so we
+// defensively try a few common key names rather than assuming one — a
+// missing label just shows as blank/"Office #id" instead of throwing and
+// breaking the page. ---
 const officeOptions = ref<{ id: number; label: string }[]>([]);
 const loadingOffices = ref(false);
 
 const resolveOfficeLabel = (raw: any): string => {
-    return raw.label ?? raw.name ?? raw.office_name ?? raw.text ?? `Office #${raw.id ?? raw.value}`;
+    return raw.office_name ?? raw.officeName ?? raw.label ?? raw.name ?? raw.text ?? `Office #${raw.id ?? raw.value}`;
 };
 
 const fetchOfficeOptions = async () => {
     loadingOffices.value = true;
     try {
-        const response = await axios.get('/Office/lookup');
+        const response = await axios.post('/Office/list', { per_page: 1000 });
         const rawList: any[] = Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
         officeOptions.value = rawList.map((raw) => ({
             id: raw.id ?? raw.value,

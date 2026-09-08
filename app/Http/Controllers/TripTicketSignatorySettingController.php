@@ -9,7 +9,7 @@ class TripTicketSignatorySettingController extends Controller
 {
     public function index()
     {
-        return inertia('TripTicketSignatorySetting/Index');
+        return inertia('TripTicketSignatorySettings/Index');
     }
 
     /**

@@ -100,6 +100,11 @@ class AppServiceProvider extends ServiceProvider
                         'delete' => false,
                         'view' => false,
                         'print' => false,
+                        // Raw accLevel, exposed alongside the derived booleans above
+                        // so the frontend can gate things the generic Gates don't
+                        // cover (e.g. Super-Admin-only sidebar links) without
+                        // re-deriving a new permission flag for every one-off case.
+                        'accLevel' => null,
                     ];
                 }
 
@@ -109,6 +114,7 @@ class AppServiceProvider extends ServiceProvider
                     'delete' => Gate::allows('delete'),
                     'view' => Gate::allows('view'),
                     'print' => Gate::allows('print'),
+                    'accLevel' => auth()->user()->employeeRecord?->accLevel,
                 ];
             },
         ]);
