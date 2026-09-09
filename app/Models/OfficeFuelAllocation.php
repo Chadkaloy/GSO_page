@@ -11,7 +11,9 @@ class OfficeFuelAllocation extends Model
 
     protected $fillable = [
         'office_id',
+        'year',
         'liters_allocated',
+        'liters_remaining',
     ];
 
     // No formal DB-level FK constraint (see migration comment), but this
@@ -20,5 +22,10 @@ class OfficeFuelAllocation extends Model
     public function office()
     {
         return $this->belongsTo(\App\Models\OfficeDictionary::class, 'office_id');
+    }
+
+    public function transactions()
+    {
+        return $this->hasMany(OfficeFuelAllocationTransaction::class, 'office_fuel_allocation_id');
     }
 }

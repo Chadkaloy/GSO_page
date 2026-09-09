@@ -47,7 +47,9 @@ const breadcrumbs: BreadcrumbItem[] = [
 export interface FuelAllocationRecord {
     id: number;
     office_id: number;
+    year: number;
     liters_allocated: number | string;
+    liters_remaining: number | string;
 }
 
 const permissions = computed(() => usePage().props.permissions as {
@@ -70,7 +72,7 @@ const officeOptions = ref<{ id: number; label: string }[]>([]);
 const loadingOffices = ref(false);
 
 const resolveOfficeLabel = (raw: any): string => {
-    return raw.office_name ?? raw.officeName ?? raw.label ?? raw.name ?? raw.text ?? `Office #${raw.id ?? raw.value}`;
+    return raw.officeName ?? raw.office_name ?? raw.label ?? raw.name ?? raw.text ?? `Office #${raw.id ?? raw.value}`;
 };
 
 const fetchOfficeOptions = async () => {
@@ -98,6 +100,8 @@ const officeLabelMap = computed(() => {
 
 const officeLabel = (officeId: number) => officeLabelMap.value.get(officeId) ?? `Office #${officeId}`;
 
+const currentYear = new Date().getFullYear();
+
 /* Table Columns */
 const columns: ColumnDef<FuelAllocationRecord>[] = [
     {
@@ -116,9 +120,32 @@ const columns: ColumnDef<FuelAllocationRecord>[] = [
         cell: ({ row }) => h('div', { class: 'font-medium' }, officeLabel(row.original.office_id)),
     },
     {
-        accessorKey: 'liters_allocated',
-        header: 'Liters Allocated',
-        cell: ({ row }) => h('div', {}, `${row.getValue('liters_allocated')} L`),
+        accessorKey: 'year',
+        header: ({ column }) => {
+            return h(
+                Button,
+                {
+                    variant: 'ghost',
+                    onClick: () => column.toggleSorting(column.getIsSorted() === 'asc'),
+                },
+                () => ['Year', h(ArrowUpDown, { class: 'ml-2 h-4 w-4' })],
+            );
+        },
+        cell: ({ row }) => h('div', {}, row.getValue('year')),
+    },
+    {
+        id: 'balance',
+        header: 'Remaining / Allocated',
+        cell: ({ row }) => {
+            const remaining = Number(row.original.liters_remaining);
+            const allocated = Number(row.original.liters_allocated);
+            const isLow = allocated > 0 && remaining / allocated <= 0.15;
+            return h(
+                'div',
+                { class: isLow ? 'font-medium text-destructive' : 'font-medium' },
+                `${remaining}L / ${allocated}L`,
+            );
+        },
     },
     {
         id: 'actions',
@@ -145,7 +172,9 @@ const itemID = ref<number | null>(null);
 const submitting = ref(false);
 
 const formOfficeId = ref<number | undefined>(undefined);
+const formYear = ref<number>(currentYear);
 const formLitersAllocated = ref<string>('');
+const formLitersRemaining = ref<number | null>(null); // display-only, shown in edit mode
 const formErrors = ref<Record<string, string>>({});
 
 const refreshKey = ref(0);
@@ -160,7 +189,9 @@ const triggerTableRefresh = async () => {
 
 const resetForm = () => {
     formOfficeId.value = undefined;
+    formYear.value = currentYear;
     formLitersAllocated.value = '';
+    formLitersRemaining.value = null;
     formErrors.value = {};
     itemID.value = null;
 };
@@ -174,7 +205,7 @@ const handleOpenDialogForm = () => {
 const onSubmit = async () => {
     formErrors.value = {};
 
-    if (!formOfficeId.value) {
+    if (mode.value === 'create' && !formOfficeId.value) {
         formErrors.value['office_id'] = 'Please select an office.';
         toast.error('Please select an office.');
         return;
@@ -188,16 +219,19 @@ const onSubmit = async () => {
 
     submitting.value = true;
     try {
-        const payload = {
-            office_id: formOfficeId.value,
-            liters_allocated: litersNumber,
-        };
-
         if (mode.value === 'create') {
-            await axios.post(baseentityurl, payload);
+            await axios.post(baseentityurl, {
+                office_id: formOfficeId.value,
+                year: formYear.value,
+                liters_allocated: litersNumber,
+            });
             toast.success('Fuel allocation added successfully.');
         } else {
-            await axios.put(`${baseentityurl}/${itemID.value}`, payload);
+            // office_id/year are locked after creation — only the allocated
+            // total can be adjusted (see controller comment on why).
+            await axios.put(`${baseentityurl}/${itemID.value}`, {
+                liters_allocated: litersNumber,
+            });
             toast.success('Fuel allocation updated successfully.');
         }
 
@@ -228,7 +262,9 @@ const handleEdit = async (id: number) => {
 
         const response = await axios.get(`${baseentityurl}/${id}`);
         formOfficeId.value = response.data.office_id;
+        formYear.value = response.data.year;
         formLitersAllocated.value = String(response.data.liters_allocated);
+        formLitersRemaining.value = Number(response.data.liters_remaining);
 
         showDialogForm.value = true;
     } catch (error) {
@@ -286,11 +322,13 @@ onMounted(fetchOfficeOptions);
                         <DialogTitle>{{ mode === 'create' ? 'Add' : 'Modify' }} {{ baseentityname }}</DialogTitle>
                     </DialogHeader>
                     <DialogDescription>
-                        Set how many liters of fuel are allocated to an office.
+                        {{ mode === 'create'
+                            ? "Set how many liters of fuel are allocated to an office for a given year."
+                            : "Office and year can't be changed after creation — only the allocated total can be adjusted." }}
                     </DialogDescription>
 
                     <form class="space-y-4 pt-2" @submit.prevent="onSubmit">
-                        <div class="space-y-2">
+                        <div v-if="mode === 'create'" class="space-y-2">
                             <Label>Office</Label>
                             <Select
                                 :model-value="formOfficeId ? String(formOfficeId) : undefined"
@@ -313,6 +351,28 @@ onMounted(fetchOfficeOptions);
                                 {{ formErrors['office_id'] }}
                             </p>
                         </div>
+                        <div v-else class="space-y-1">
+                            <Label>Office</Label>
+                            <p class="text-sm">{{ officeLabel(formOfficeId ?? 0) }}</p>
+                        </div>
+
+                        <div v-if="mode === 'create'" class="space-y-2">
+                            <Label>Year</Label>
+                            <Input
+                                v-model.number="formYear"
+                                type="number"
+                                :min="2000"
+                                :max="2100"
+                                placeholder="e.g., 2026"
+                            />
+                            <p v-if="formErrors['year']" class="text-sm font-medium text-destructive">
+                                {{ formErrors['year'] }}
+                            </p>
+                        </div>
+                        <div v-else class="space-y-1">
+                            <Label>Year</Label>
+                            <p class="text-sm">{{ formYear }}</p>
+                        </div>
 
                         <div class="space-y-2">
                             <Label>Liters Allocated</Label>
@@ -325,6 +385,10 @@ onMounted(fetchOfficeOptions);
                             />
                             <p v-if="formErrors['liters_allocated']" class="text-sm font-medium text-destructive">
                                 {{ formErrors['liters_allocated'] }}
+                            </p>
+                            <p v-if="mode === 'edit' && formLitersRemaining !== null" class="text-xs text-muted-foreground">
+                                Currently {{ formLitersRemaining }}L remaining. Changing the allocated total adjusts the
+                                remaining balance by the same amount (e.g. topping up by 10L adds 10L to what's left).
                             </p>
                         </div>
 

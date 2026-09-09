@@ -71,6 +71,7 @@ export interface TripTicketRecord {
     requester_office: string;
     destination: string;
     purpose: string;
+    estimated_liters?: number | string | null;
     time_departure: string;
     time_return?: string | null;
     vehicle_id: number;
@@ -226,6 +227,33 @@ const showDialogForm = ref(false);
 const mode = ref('create');
 const itemID = ref<number | null>(null);
 
+// Options for the "Department / Office" dropdown — pulled from Office
+// Dictionary via the same /Office/list endpoint the Fuel Allocation page
+// uses (there is no /Office/lookup route). Storing the office's NAME as the
+// field's value (not an id) since requester_office is a plain string column
+// on trip_ticket_record — this just makes sure what's stored here always
+// exactly matches an Office Dictionary entry, which the fuel-allocation
+// approval hook depends on to find the right office's balance.
+const officeOptions = ref<string[]>([]);
+const loadingOffices = ref(false);
+
+const resolveOfficeLabel = (raw: any): string => {
+    return raw.officeName ?? raw.office_name ?? raw.label ?? raw.name ?? raw.text ?? '';
+};
+
+const fetchOfficeOptions = async () => {
+    loadingOffices.value = true;
+    try {
+        const response = await axios.post('/Office/list', { per_page: 1000 });
+        const rawList: any[] = Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
+        officeOptions.value = rawList.map(resolveOfficeLabel).filter(Boolean);
+    } catch (error) {
+        toast.error('Failed to load office list.');
+    } finally {
+        loadingOffices.value = false;
+    }
+};
+
 // Options for the "Vehicle" dropdown — only Available vehicles, showing plate_no.
 const availableVehicles = ref<{ id: number; plate_no: string; brand?: string; model?: string; capacity?: number }[]>([]);
 const loadingVehicles = ref(false);
@@ -330,6 +358,10 @@ const schema = z.object({
     requester_office: z.string().min(1, 'Office name is required').max(100),
     destination: z.string().min(1, 'Destination is required').max(200),
     purpose: z.string().min(1, 'Purpose description is required'),
+    estimated_liters: z.preprocess(
+        (val) => (val === '' || val === null || val === undefined ? undefined : Number(val)),
+        z.number().min(0, 'Must be zero or more').optional(),
+    ),
     time_departure: z.string().min(1, 'Departure timeframe configuration required'),
     time_return: z.string().optional().nullable(),
     passenger_count: z.preprocess((val) => (val === '' || val === null ? 0 : Number(val)), z.number().int().nonnegative().default(0)),
@@ -353,6 +385,11 @@ const fieldconfig: any = {
     purpose: { 
         label: 'Purpose of Trip', 
         inputProps: { type: 'textarea' } 
+    },
+    estimated_liters: {
+        label: 'Estimated Fuel (Liters, Optional)',
+        inputProps: { type: 'number', min: 0, step: 0.01, placeholder: 'e.g., 6' },
+        description: "Leave blank to skip fuel tracking for this trip. If set, this amount is reserved from the office's fuel allocation once the trip is Approved.",
     },
     time_departure: { 
         label: 'Departure Schedule', 
@@ -384,6 +421,7 @@ const form = useForm({
         requester_office: '',
         destination: '',
         purpose: '',
+        estimated_liters: '' as any,
         time_departure: '',
         time_return: '',
         vehicle_id: '' as any,
@@ -410,6 +448,7 @@ const handleOpenDialogForm = () => {
     showDialogForm.value = true;
     fetchAvailableVehicles();
     fetchAvailableDrivers();
+    fetchOfficeOptions();
 };
 
 /**
@@ -447,7 +486,7 @@ const handleEdit = async (id: number) => {
         mode.value = 'edit';
         itemID.value = id;
 
-        await Promise.all([fetchAvailableVehicles(), fetchAvailableDrivers()]);
+        await Promise.all([fetchAvailableVehicles(), fetchAvailableDrivers(), fetchOfficeOptions()]);
 
         const response = await axios.get(`${baseentityurl}/${id}`);
         
@@ -490,9 +529,15 @@ const escapeHtml = (value: unknown): string => {
  * Authorized-By/Approved-by signature lines, and a blank gasoline-station
  * section. Rendered twice side-by-side to mirror the two-copy paper sheet.
  */
-const buildTripTicketCopyHtml = (trip: any): string => {
+const buildTripTicketCopyHtml = (trip: any, signatories: { municipal_administrator_name: string | null; municipal_mayor_name: string | null }): string => {
     const passengerNames = Array.isArray(trip.passengers)
         ? trip.passengers.map((p: any) => p.passenger_name).filter(Boolean).join(', ')
+        : '';
+
+    const adminName = signatories.municipal_administrator_name ?? '';
+    const mayorName = signatories.municipal_mayor_name ?? '';
+    const liters = trip.estimated_liters !== null && trip.estimated_liters !== undefined && trip.estimated_liters !== ''
+        ? `${trip.estimated_liters} L`
         : '';
 
     return `
@@ -556,9 +601,9 @@ const buildTripTicketCopyHtml = (trip: any): string => {
             <table class="field-grid">
                 <tr>
                     <td class="label">CHARGING:</td>
-                    <td class="value blank"></td>
+                    <td class="value blank">${escapeHtml(trip.requester_office)}</td>
                     <td class="label">NUMBER OF LITERS:</td>
-                    <td class="value blank"></td>
+                    <td class="value blank">${escapeHtml(liters)}</td>
                 </tr>
             </table>
 
@@ -567,7 +612,7 @@ const buildTripTicketCopyHtml = (trip: any): string => {
                     <td class="label">REQUESTING OFFICER:</td>
                     <td class="value">${escapeHtml(trip.requester_name)}</td>
                     <td class="label">AUTHORIZED BY:</td>
-                    <td class="value blank"></td>
+                    <td class="value blank">${escapeHtml(adminName)}</td>
                 </tr>
             </table>
 
@@ -575,12 +620,12 @@ const buildTripTicketCopyHtml = (trip: any): string => {
                 <div class="approval-caption" style="margin-bottom: 1mm;">Approved by:</div>
                 <div class="sig-row">
                     <div class="sig-cell">
-                        <div class="sig-space" style="height: 6mm;"></div>
+                        <div class="sig-name" style="text-align: center; font-weight: bold; font-size: 9.5px; min-height: 11px;">${escapeHtml(adminName)}</div>
                         <div class="sig-bar"></div>
                         <div class="sig-caption">Municipal Administrator</div>
                     </div>
                     <div class="sig-cell">
-                        <div class="sig-space" style="height: 6mm;"></div>
+                        <div class="sig-name" style="text-align: center; font-weight: bold; font-size: 9.5px; min-height: 11px;">${escapeHtml(mayorName)}</div>
                         <div class="sig-bar"></div>
                         <div class="sig-caption">Municipal Mayor</div>
                     </div>
@@ -641,10 +686,21 @@ const buildTripTicketCopyHtml = (trip: any): string => {
  */
 const handlePrintTripTicket = async (id: number) => {
     try {
-        const response = await axios.get(`${baseentityurl}/${id}`);
-        const trip = response.data;
-        const copyHtmlLeft = buildTripTicketCopyHtml(trip);
-        const copyHtmlRight = buildTripTicketCopyHtml(trip);
+        const [tripResponse, signatoryResponse] = await Promise.all([
+            axios.get(`${baseentityurl}/${id}`),
+            // Non-fatal if this fails — printing shouldn't be blocked by the
+            // signatory settings endpoint; the signature lines just print
+            // blank (same as before this feature existed) on failure.
+            axios.get('/TripTicketSignatory/current').catch(() => ({
+                data: { municipal_administrator_name: null, municipal_mayor_name: null },
+            })),
+        ]);
+
+        const trip = tripResponse.data;
+        const signatories = signatoryResponse.data;
+
+        const copyHtmlLeft = buildTripTicketCopyHtml(trip, signatories);
+        const copyHtmlRight = buildTripTicketCopyHtml(trip, signatories);
 
         const printWindow = window.open('', '_blank', 'width=1400,height=900');
         if (!printWindow) {
@@ -812,6 +868,37 @@ const handleDelete = async () => {
                         :field-config="fieldconfig"
                         @submit="onSubmit"
                     >
+                        <template #requester_office>
+                            <FormField v-slot="{ componentField }" name="requester_office">
+                                <FormItem>
+                                    <FormLabel>Department / Office</FormLabel>
+                                    <Select
+                                        :model-value="componentField.modelValue || undefined"
+                                        @update:model-value="componentField['onUpdate:modelValue']"
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue :placeholder="loadingOffices ? 'Loading offices…' : 'Select an office'" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            <SelectItem
+                                                v-for="officeName in officeOptions"
+                                                :key="officeName"
+                                                :value="officeName"
+                                            >
+                                                {{ officeName }}
+                                            </SelectItem>
+                                            <div v-if="!loadingOffices && officeOptions.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                                                No offices found in Office Dictionary.
+                                            </div>
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            </FormField>
+                        </template>
+
                         <template #vehicle_id>
                             <FormField v-slot="{ componentField }" name="vehicle_id">
                                 <FormItem>

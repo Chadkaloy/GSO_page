@@ -36,11 +36,30 @@ class OfficeFuelAllocationController extends Controller
         Gate::authorize('create');
 
         $validated = $request->validate([
-            'office_id'        => 'required|integer|unique:office_fuel_allocations,office_id',
+            'office_id'        => 'required|integer',
+            'year'             => 'required|integer|min:2000|max:2100',
             'liters_allocated' => 'required|numeric|min:0',
         ]);
 
-        $allocation = OfficeFuelAllocation::create($validated);
+        $duplicate = OfficeFuelAllocation::where('office_id', $validated['office_id'])
+            ->where('year', $validated['year'])
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'errors' => [
+                    'office_id' => ["This office already has a fuel allocation set for {$validated['year']}."],
+                ],
+            ], 422);
+        }
+
+        $allocation = OfficeFuelAllocation::create([
+            'office_id'        => $validated['office_id'],
+            'year'             => $validated['year'],
+            'liters_allocated' => $validated['liters_allocated'],
+            // Starts fully unspent — this is what trip creation will deduct from.
+            'liters_remaining' => $validated['liters_allocated'],
+        ]);
 
         return response()->json([
             'message'    => 'Fuel allocation added successfully!',
@@ -61,12 +80,23 @@ class OfficeFuelAllocationController extends Controller
 
         $allocation = OfficeFuelAllocation::findOrFail($id);
 
+        // office_id and year are intentionally NOT editable here — changing
+        // which office/year an existing allocation belongs to would orphan
+        // the meaning of any ledger transactions already tied to it (see
+        // OfficeFuelAllocationTransaction). Only the granted total can be
+        // adjusted — e.g. a mid-year top-up or correction.
         $validated = $request->validate([
-            'office_id'        => 'sometimes|integer|unique:office_fuel_allocations,office_id,' . $id,
-            'liters_allocated' => 'sometimes|numeric|min:0',
+            'liters_allocated' => 'required|numeric|min:0',
         ]);
 
-        $allocation->update($validated);
+        // Move liters_remaining by the same delta as the change in the
+        // granted total, so whatever's already been spent stays spent —
+        // e.g. 40/50L remaining, top up to 70L allocated -> 60/70L remaining.
+        $delta = $validated['liters_allocated'] - (float) $allocation->liters_allocated;
+
+        $allocation->liters_allocated = $validated['liters_allocated'];
+        $allocation->liters_remaining = max(0, (float) $allocation->liters_remaining + $delta);
+        $allocation->save();
 
         return response()->json([
             'message'    => 'Fuel allocation updated successfully!',

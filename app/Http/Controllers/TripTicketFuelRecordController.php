@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\TripTicketFuelRecord;
+use App\Services\FuelAllocationService;
 use App\Traits\HasRelevanceSearch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -68,6 +69,18 @@ class TripTicketFuelRecordController extends Controller
 
         $fuelRecord = TripTicketFuelRecord::create($validated);
 
+        // Reconcile this trip's original fuel estimate (reserved at approval
+        // time) against what was actually used — refunds the unused portion
+        // back to the office's allocation, or deducts the extra if usage
+        // exceeded the estimate. Silently does nothing if there's nothing to
+        // reconcile against (trip had no estimate, or was already
+        // reconciled by an earlier fuel log for the same trip) — never
+        // blocks saving the fuel record itself.
+        app(FuelAllocationService::class)->reconcileForTrip(
+            $validated['trip_id'],
+            (float) $validated['fuel_liters']
+        );
+
         return response()->json([
             'message'     => 'Fuel purchase ledger entry added successfully.',
             'fuel_record' => $fuelRecord->load('recorder:accID,fullName')
@@ -101,6 +114,11 @@ class TripTicketFuelRecordController extends Controller
             'remarks'        => 'nullable|string',
         ]);
 
+        // NOTE: editing fuel_liters here does NOT re-run reconciliation —
+        // reconcileForTrip() already guards against double-refunding, and a
+        // correction to a fuel log's liters after the fact is rare enough
+        // that re-triggering allocation math here would add more risk
+        // (silently double-adjusting) than it's worth for now.
         $fuelRecord->update($validated);
 
         return response()->json([

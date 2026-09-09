@@ -2,13 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OfficeDictionary;
 use App\Models\TripTicketApprovalLog;
 use App\Models\TripTicketRecord;
+use App\Services\FuelAllocationService;
 use App\Traits\HasRelevanceSearch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 class TripTicketApprovalController extends Controller
 {
@@ -100,6 +103,40 @@ class TripTicketApprovalController extends Controller
             }
             $validated['approver_id'] = $employeeRecord->accID;
 
+            // Reserve the trip's estimated fuel against its office's
+            // allocation the moment it's Approved (not at creation) — see
+            // FuelAllocationService for the reasoning. Skipped entirely if
+            // the trip has no estimated_liters set, so trips that never used
+            // fuel tracking are unaffected. If the office can't be matched
+            // in Office Dictionary, or there's no allocation / not enough
+            // remaining for it, the approval itself is blocked with a clear
+            // 422 rather than silently letting fuel usage go untracked.
+            if ($validated['action'] === 'Approved' && (float) $trip->estimated_liters > 0) {
+                $office = OfficeDictionary::where('officeName', $trip->requester_office)->first();
+
+                if (!$office) {
+                    DB::rollBack();
+                    return response()->json([
+                        'errors' => [
+                            'trip_id' => [
+                                "Trip {$trip->trip_no}'s office (\"{$trip->requester_office}\") doesn't match any entry in Office Dictionary, so its fuel allocation can't be located. Fix the office name on the trip, or set up a matching Office Dictionary entry first.",
+                            ],
+                        ],
+                    ], 422);
+                }
+
+                try {
+                    app(FuelAllocationService::class)->deductForTrip(
+                        $office->id,
+                        (float) $trip->estimated_liters,
+                        $trip->id
+                    );
+                } catch (ValidationException $e) {
+                    DB::rollBack();
+                    return response()->json(['errors' => $e->errors()], 422);
+                }
+            }
+
             $log = TripTicketApprovalLog::create($validated);
 
             // Sync structural status constraints back cleanly to the parent record
@@ -142,6 +179,12 @@ class TripTicketApprovalController extends Controller
         // approver_id is intentionally never editable here — the recorded
         // approver of a decision shouldn't change just because someone edits
         // the comments or date on it later.
+        //
+        // NOTE: fuel deduction is intentionally NOT re-triggered here even if
+        // 'action' is edited to/from 'Approved'. This endpoint only corrects
+        // metadata on an existing log entry; if a fuel-relevant status change
+        // needs to happen, it should go through store() as a fresh decision
+        // so the allocation math stays traceable to one clear event.
 
         try {
             DB::beginTransaction();

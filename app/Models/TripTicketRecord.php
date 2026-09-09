@@ -15,6 +15,7 @@ class TripTicketRecord extends Model
         'requester_office',
         'destination',
         'purpose',
+        'estimated_liters',
         'time_departure',
         'time_return',
         'vehicle_id',

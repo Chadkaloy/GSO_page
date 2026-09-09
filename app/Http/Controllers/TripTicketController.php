@@ -98,6 +98,10 @@ class TripTicketController extends Controller
             'requester_office' => 'required|string|max:100',
             'destination'      => 'required|string|max:200',
             'purpose'          => 'required|string',
+            // Optional — a trip with no estimate simply skips fuel
+            // deduction/reconciliation entirely (see TripTicketApprovalController
+            // and TripTicketFuelRecordController).
+            'estimated_liters' => 'nullable|numeric|min:0',
             'time_departure'   => 'required',
             'time_return'      => 'nullable',
             'vehicle_id'       => 'required|integer',
@@ -179,6 +183,7 @@ class TripTicketController extends Controller
             'requester_office' => 'required|string|max:100',
             'destination'      => 'required|string|max:200',
             'purpose'          => 'required|string',
+            'estimated_liters' => 'nullable|numeric|min:0',
             'time_departure'   => 'required',
             'time_return'      => 'nullable',
             'vehicle_id'       => 'required|integer',
