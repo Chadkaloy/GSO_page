@@ -57,6 +57,10 @@
             background: #2563eb;
             color: #fff;
         }
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
         .btn-secondary {
             background: transparent;
             color: #cbd5e1;
@@ -73,12 +77,39 @@
                 {{ $exception->getMessage() ?: 'You are not authorized to access this page.' }}
             </div>
             <div class="actions">
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-                    <button type="submit" class="btn btn-primary">Log Out</button>
-                </form>
+                <!--
+                    Intentionally NOT a native <form method="POST">. When this
+                    page is rendered inside a restrictive sandboxed iframe
+                    (e.g. Laravel Debugbar's AJAX-error preview, which is very
+                    likely what's happening if you see this locally — check
+                    whether DEBUGBAR_ENABLED is on), real form submissions get
+                    blocked entirely. fetch()/XHR is not subject to that
+                    restriction, so logout still completes either way.
+                -->
+                <button type="button" id="logout-btn" class="btn btn-primary" onclick="performLogout()">Log Out</button>
             </div>
+            <div id="logout-status" style="margin-top: 12px; font-size: 13px; color: #94a3b8;"></div>
         </div>
     </div>
+
+    <script>
+        function performLogout() {
+            const btn = document.getElementById('logout-btn');
+            const status = document.getElementById('logout-status');
+            btn.disabled = true;
+            btn.textContent = 'Logging out…';
+
+            fetch('{{ route('logout') }}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json',
+                },
+                credentials: 'same-origin',
+            }).finally(() => {
+                window.location.href = '{{ url('/login') }}';
+            });
+        }
+    </script>
 </body>
 </html>

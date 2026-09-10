@@ -14,6 +14,14 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog'; 
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import AppLayout from '@/layouts/AppLayout.vue'; 
 import { Head, usePage } from '@inertiajs/vue3'; 
 
@@ -57,6 +65,32 @@ const triggerTableRefresh = async () => {
     refreshKey.value++;
     if (tableRef.value && typeof tableRef.value.fetchRows === 'function') {
         await tableRef.value.fetchRows();
+    }
+};
+
+// --- Office options for the "Office Assignment" dropdown — pulled from
+// Office Dictionary via /Office/list (there is no /Office/lookup route).
+// Storing the office's NAME as the field's value since `office` is a plain
+// string column on emp_pgc_record, not a foreign key. officeName is the
+// confirmed real column on office_dictionary; the rest are defensive
+// fallbacks in case that ever changes. ---
+const officeOptions = ref<string[]>([]);
+const loadingOffices = ref(false);
+
+const resolveOfficeLabel = (raw: any): string => {
+    return raw.officeName ?? raw.office_name ?? raw.label ?? raw.name ?? raw.text ?? '';
+};
+
+const fetchOfficeOptions = async () => {
+    loadingOffices.value = true;
+    try {
+        const response = await axios.post('/Office/list', { per_page: 1000 });
+        const rawList: any[] = Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
+        officeOptions.value = rawList.map(resolveOfficeLabel).filter(Boolean);
+    } catch (error) {
+        toast.error('Failed to load office list.');
+    } finally {
+        loadingOffices.value = false;
     }
 };
 
@@ -189,6 +223,7 @@ const handleOpenDialogForm = () => {
     resetForm();
     mode.value = 'create'; 
     showDialogForm.value = true; 
+    fetchOfficeOptions();
 };
 
 const onSubmit = async (values: any) => {
@@ -219,6 +254,7 @@ const handleEdit = async (id: number) => {
         resetForm();
         mode.value = 'edit'; 
         itemID.value = id; 
+        await fetchOfficeOptions();
         const response = await axios.get(`${baseentityurl}/${id}`); 
         form.setValues(response.data); 
         showDialogForm.value = true; 
@@ -284,6 +320,37 @@ const handleDelete = async () => {
                         :field-config="fieldconfig"
                         @submit="onSubmit"
                     >
+                        <template #office>
+                            <FormField v-slot="{ componentField }" name="office">
+                                <FormItem>
+                                    <FormLabel>Office Assignment</FormLabel>
+                                    <Select
+                                        :model-value="componentField.modelValue || undefined"
+                                        @update:model-value="componentField['onUpdate:modelValue']"
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue :placeholder="loadingOffices ? 'Loading offices…' : 'Select an office'" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            <SelectItem
+                                                v-for="officeName in officeOptions"
+                                                :key="officeName"
+                                                :value="officeName"
+                                            >
+                                                {{ officeName }}
+                                            </SelectItem>
+                                            <div v-if="!loadingOffices && officeOptions.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                                                No offices found in Office Dictionary.
+                                            </div>
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            </FormField>
+                        </template>
+
                         <DialogFooter>
                             <Button type="submit" class="bg-yellow-600 w-full">
                                 {{ mode === 'create' ? 'Save Record Data' : 'Apply Structural Updates' }}

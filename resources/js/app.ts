@@ -25,5 +25,14 @@ createInertiaApp({
     },
 });
 
-// This will set light / dark mode on page load...
-initializeTheme();
+// This will set light / dark mode on page load. Wrapped defensively —
+// this must NEVER be able to throw and interfere with the Inertia app
+// above successfully mounting. If localStorage/matchMedia access ever
+// fails (sandboxed context, privacy mode, stale cached page state,
+// etc.), the appearance just falls back to default rather than risking
+// leaving the page stuck on its pre-mount loading placeholder.
+try {
+    initializeTheme();
+} catch (error) {
+    console.warn('initializeTheme() failed — continuing with default appearance.', error);
+}
