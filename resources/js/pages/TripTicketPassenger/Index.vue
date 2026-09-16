@@ -115,6 +115,31 @@ const fetchPendingTrips = async () => {
     }
 };
 
+// --- Office options for each passenger's "Department / Agency Office"
+// field — pulled from Office Dictionary via /Office/list (there is no
+// /Office/lookup route). officeName is the confirmed real column on
+// office_dictionary; the rest are defensive fallbacks in case that ever
+// changes. Fetched once and shared across all passenger rows. ---
+const officeOptions = ref<string[]>([]);
+const loadingOffices = ref(false);
+
+const resolveOfficeLabel = (raw: any): string => {
+    return raw.officeName ?? raw.office_name ?? raw.label ?? raw.name ?? raw.text ?? '';
+};
+
+const fetchOfficeOptions = async () => {
+    loadingOffices.value = true;
+    try {
+        const response = await axios.post('/Office/list', { per_page: 1000 });
+        const rawList: any[] = Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
+        officeOptions.value = rawList.map(resolveOfficeLabel).filter(Boolean);
+    } catch (error) {
+        toast.error('Failed to load office list.');
+    } finally {
+        loadingOffices.value = false;
+    }
+};
+
 // When editing a passenger whose trip is no longer Pending (e.g. it has since
 // been Approved/Completed), that trip won't be in the Pending-only dropdown
 // list. Fetch it specifically and splice it in so the dropdown can still
@@ -400,6 +425,7 @@ const handleOpenDialogForm = () => {
     mode.value = 'create';
     showDialogForm.value = true;
     fetchPendingTrips();
+    fetchOfficeOptions();
 };
 
 const onSubmit = async (values: any) => {
@@ -439,6 +465,7 @@ const handleEdit = async (id: number) => {
         itemID.value = id;
 
         await fetchPendingTrips();
+        await fetchOfficeOptions();
 
         const response = await axios.get(`${baseentityurl}/${id}`);
         
@@ -691,7 +718,26 @@ const handleDelete = async () => {
 
                                 <div class="space-y-2">
                                     <Label>Department / Agency Office</Label>
-                                    <Input v-model="row.office" placeholder="e.g., GSO Office (Optional)" />
+                                    <Select
+                                        :model-value="row.office || undefined"
+                                        @update:model-value="(val) => (row.office = val ? String(val) : '')"
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue :placeholder="loadingOffices ? 'Loading offices…' : 'Select an office (Optional)'" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem
+                                                v-for="officeName in officeOptions"
+                                                :key="officeName"
+                                                :value="officeName"
+                                            >
+                                                {{ officeName }}
+                                            </SelectItem>
+                                            <div v-if="!loadingOffices && officeOptions.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                                                No offices found in Office Dictionary.
+                                            </div>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 <div class="space-y-2">
@@ -759,6 +805,37 @@ const handleDelete = async () => {
                                             </SelectItem>
                                             <div v-if="!loadingPendingTrips && tripOptions.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
                                                 No pending trips with open seats found.
+                                            </div>
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            </FormField>
+                        </template>
+
+                        <template #office>
+                            <FormField v-slot="{ componentField }" name="office">
+                                <FormItem>
+                                    <FormLabel>Department / Agency Office</FormLabel>
+                                    <Select
+                                        :model-value="componentField.modelValue || undefined"
+                                        @update:model-value="componentField['onUpdate:modelValue']"
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue :placeholder="loadingOffices ? 'Loading offices…' : 'Select an office (Optional)'" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            <SelectItem
+                                                v-for="officeName in officeOptions"
+                                                :key="officeName"
+                                                :value="officeName"
+                                            >
+                                                {{ officeName }}
+                                            </SelectItem>
+                                            <div v-if="!loadingOffices && officeOptions.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                                                No offices found in Office Dictionary.
                                             </div>
                                         </SelectContent>
                                     </Select>
